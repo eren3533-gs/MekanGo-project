@@ -6,6 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecordViewBody {
+export interface Review {
+  id: number;
   businessId: number;
+  userId: string;
+  userName: string;
+  rating: number;
+  comment?: string | null;
+  createdAt: string;
 }

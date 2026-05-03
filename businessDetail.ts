@@ -6,6 +6,4 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecordViewBody {
-  businessId: number;
-}
+export type BusinessSocialLinks = { [key: string]: string } | null;

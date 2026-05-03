@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecordViewBody {
-  businessId: number;
+export interface DailyViewCount {
+  date: string;
+  count: number;
 }

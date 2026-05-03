@@ -6,6 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecordViewBody {
+export interface Product {
+  id: number;
   businessId: number;
+  name: string;
+  description?: string | null;
+  price: number;
+  image?: string | null;
+  createdAt: string;
 }

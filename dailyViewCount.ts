@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface RecordViewBody {
-  businessId: number;
+export interface SubscriptionPlan {
+  id: number;
+  name: string;
+  tier: string;
+  priceMonthly: number;
+  features: string[];
 }
