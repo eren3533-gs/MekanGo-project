@@ -1,0 +1,66 @@
+import { Router } from "express";
+import { db } from "@workspace/db";
+import { profileViewsTable, businessesTable, campaignsTable, productsTable, reviewsTable } from "@workspace/db";
+import { getAuth } from "@clerk/express";
+import { eq, and, gte, count, avg, sql } from "drizzle-orm";
+import { RecordProfileViewBody } from "@workspace/api-zod";
+
+const router = Router();
+
+router.get("/analytics/my", async (req, res): Promise<void> => {
+  const auth = getAuth(req);
+  if (!auth?.userId) { res.status(401).json({ error: "Unauthorized" }); return; }
+  const [business] = await db.select().from(businessesTable).where(eq(businessesTable.ownerId, auth.userId));
+  if (!business) { res.status(404).json({ error: "Business not found" }); return; }
+
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}`;
+
+  const [totalViews, viewsThisMonth, viewsLastMonth, totalCampaigns, totalProducts, reviewStats] = await Promise.all([
+    db.select({ count: count() }).from(profileViewsTable).where(eq(profileViewsTable.businessId, business.id)),
+    db.select({ count: count() }).from(profileViewsTable).where(
+      and(eq(profileViewsTable.businessId, business.id), sql`${profileViewsTable.viewDate} LIKE ${thisMonth + "%"}`)
+    ),
+    db.select({ count: count() }).from(profileViewsTable).where(
+      and(eq(profileViewsTable.businessId, business.id), sql`${profileViewsTable.viewDate} LIKE ${lastMonth + "%"}`)
+    ),
+    db.select({ count: count() }).from(campaignsTable).where(eq(campaignsTable.businessId, business.id)),
+    db.select({ count: count() }).from(productsTable).where(eq(productsTable.businessId, business.id)),
+    db.select({ avg: avg(reviewsTable.rating), count: count() }).from(reviewsTable).where(eq(reviewsTable.businessId, business.id)),
+  ]);
+
+  const thirtyDaysAgo = new Date(now);
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split("T")[0];
+
+  const dailyViewsRaw = await db
+    .select({ date: profileViewsTable.viewDate, count: count() })
+    .from(profileViewsTable)
+    .where(and(eq(profileViewsTable.businessId, business.id), gte(profileViewsTable.viewDate, thirtyDaysAgoStr)))
+    .groupBy(profileViewsTable.viewDate)
+    .orderBy(profileViewsTable.viewDate);
+
+  res.json({
+    totalProfileViews: totalViews[0]?.count ?? 0,
+    viewsThisMonth: viewsThisMonth[0]?.count ?? 0,
+    viewsLastMonth: viewsLastMonth[0]?.count ?? 0,
+    totalCampaignClicks: 0,
+    totalReviews: reviewStats[0]?.count ?? 0,
+    averageRating: parseFloat(reviewStats[0]?.avg ?? "0"),
+    totalProducts: totalProducts[0]?.count ?? 0,
+    totalCampaigns: totalCampaigns[0]?.count ?? 0,
+    dailyViews: dailyViewsRaw,
+  });
+});
+
+router.post("/analytics/my/record-view", async (req, res): Promise<void> => {
+  const parsed = RecordProfileViewBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const today = new Date().toISOString().split("T")[0];
+  await db.insert(profileViewsTable).values({ businessId: parsed.data.businessId, viewDate: today });
+  res.status(204).send();
+});
+
+export default router;
