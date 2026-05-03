@@ -1,66 +1,155 @@
-import { Router } from "express";
-import { db } from "@workspace/db";
-import { profileViewsTable, businessesTable, campaignsTable, productsTable, reviewsTable } from "@workspace/db";
-import { getAuth } from "@clerk/express";
-import { eq, and, gte, count, avg, sql } from "drizzle-orm";
-import { RecordProfileViewBody } from "@workspace/api-zod";
+import { useState } from "react";
+import { useListBusinesses, useListCategories } from "@workspace/api-client-react";
+import { BusinessCard } from "@/components/business-card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Search, SlidersHorizontal, X } from "lucide-react";
+import { motion } from "framer-motion";
 
-const router = Router();
+export default function Businesses() {
+  const [search, setSearch] = useState("");
+  const [categoryId, setCategoryId] = useState<string>("");
+  const [city, setCity] = useState("");
+  const [minRating, setMinRating] = useState<string>("");
+  const [hasActiveCampaign, setHasActiveCampaign] = useState(false);
 
-router.get("/analytics/my", async (req, res): Promise<void> => {
-  const auth = getAuth(req);
-  if (!auth?.userId) { res.status(401).json({ error: "Unauthorized" }); return; }
-  const [business] = await db.select().from(businessesTable).where(eq(businessesTable.ownerId, auth.userId));
-  if (!business) { res.status(404).json({ error: "Business not found" }); return; }
+  const params: Record<string, string | number | boolean | undefined> = {};
+  if (search) params.search = search;
+  if (categoryId && categoryId !== "all") params.categoryId = parseInt(categoryId);
+  if (city) params.city = city;
+  if (minRating && minRating !== "any") params.minRating = parseFloat(minRating);
+  if (hasActiveCampaign) params.hasActiveCampaign = true;
 
-  const now = new Date();
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, "0")}`;
+  const { data, isLoading } = useListBusinesses(params as any);
+  const { data: categories } = useListCategories();
 
-  const [totalViews, viewsThisMonth, viewsLastMonth, totalCampaigns, totalProducts, reviewStats] = await Promise.all([
-    db.select({ count: count() }).from(profileViewsTable).where(eq(profileViewsTable.businessId, business.id)),
-    db.select({ count: count() }).from(profileViewsTable).where(
-      and(eq(profileViewsTable.businessId, business.id), sql`${profileViewsTable.viewDate} LIKE ${thisMonth + "%"}`)
-    ),
-    db.select({ count: count() }).from(profileViewsTable).where(
-      and(eq(profileViewsTable.businessId, business.id), sql`${profileViewsTable.viewDate} LIKE ${lastMonth + "%"}`)
-    ),
-    db.select({ count: count() }).from(campaignsTable).where(eq(campaignsTable.businessId, business.id)),
-    db.select({ count: count() }).from(productsTable).where(eq(productsTable.businessId, business.id)),
-    db.select({ avg: avg(reviewsTable.rating), count: count() }).from(reviewsTable).where(eq(reviewsTable.businessId, business.id)),
-  ]);
+  const businesses = data?.businesses ?? [];
+  const total = data?.total ?? 0;
 
-  const thirtyDaysAgo = new Date(now);
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split("T")[0];
+  const clearFilters = () => {
+    setSearch("");
+    setCategoryId("");
+    setCity("");
+    setMinRating("");
+    setHasActiveCampaign(false);
+  };
 
-  const dailyViewsRaw = await db
-    .select({ date: profileViewsTable.viewDate, count: count() })
-    .from(profileViewsTable)
-    .where(and(eq(profileViewsTable.businessId, business.id), gte(profileViewsTable.viewDate, thirtyDaysAgoStr)))
-    .groupBy(profileViewsTable.viewDate)
-    .orderBy(profileViewsTable.viewDate);
+  const hasFilters = search || (categoryId && categoryId !== "all") || city || (minRating && minRating !== "any") || hasActiveCampaign;
 
-  res.json({
-    totalProfileViews: totalViews[0]?.count ?? 0,
-    viewsThisMonth: viewsThisMonth[0]?.count ?? 0,
-    viewsLastMonth: viewsLastMonth[0]?.count ?? 0,
-    totalCampaignClicks: 0,
-    totalReviews: reviewStats[0]?.count ?? 0,
-    averageRating: parseFloat(reviewStats[0]?.avg ?? "0"),
-    totalProducts: totalProducts[0]?.count ?? 0,
-    totalCampaigns: totalCampaigns[0]?.count ?? 0,
-    dailyViews: dailyViewsRaw,
-  });
-});
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="bg-card/50 border-b border-border py-8">
+        <div className="container mx-auto px-4">
+          <h1 className="text-3xl font-bold text-foreground mb-2">Mekanları Keşfet</h1>
+          <p className="text-muted-foreground mb-6">Şehrinin en iyi mekanlarını bul</p>
 
-router.post("/analytics/my/record-view", async (req, res): Promise<void> => {
-  const parsed = RecordProfileViewBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const today = new Date().toISOString().split("T")[0];
-  await db.insert(profileViewsTable).values({ businessId: parsed.data.businessId, viewDate: today });
-  res.status(204).send();
-});
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                data-testid="input-search"
+                placeholder="Mekan veya şehir ara..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 bg-background"
+              />
+            </div>
 
-export default router;
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger data-testid="select-category" className="w-full md:w-48 bg-background">
+                <SelectValue placeholder="Kategori" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Kategoriler</SelectItem>
+                {categories?.map((cat) => (
+                  <SelectItem key={cat.id} value={String(cat.id)}>{cat.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Input
+              data-testid="input-city"
+              placeholder="Şehir"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              className="w-full md:w-40 bg-background"
+            />
+
+            <Select value={minRating} onValueChange={setMinRating}>
+              <SelectTrigger data-testid="select-rating" className="w-full md:w-40 bg-background">
+                <SelectValue placeholder="Min. Puan" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Tüm Puanlar</SelectItem>
+                <SelectItem value="4.5">4.5+</SelectItem>
+                <SelectItem value="4.0">4.0+</SelectItem>
+                <SelectItem value="3.5">3.5+</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button
+              data-testid="button-campaign-filter"
+              variant={hasActiveCampaign ? "default" : "outline"}
+              onClick={() => setHasActiveCampaign(!hasActiveCampaign)}
+              className="whitespace-nowrap"
+            >
+              <SlidersHorizontal className="w-4 h-4 mr-2" />
+              Kampanyalı
+            </Button>
+
+            {hasFilters && (
+              <Button data-testid="button-clear-filters" variant="ghost" onClick={clearFilters}>
+                <X className="w-4 h-4 mr-1" />
+                Temizle
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <p className="text-muted-foreground text-sm">
+            {isLoading ? "Yükleniyor..." : `${total} mekan bulundu`}
+          </p>
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-72 rounded-xl" />
+            ))}
+          </div>
+        ) : businesses.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <Search className="w-16 h-16 text-muted-foreground/30 mb-4" />
+            <h3 className="text-xl font-semibold text-foreground mb-2">Sonuç bulunamadı</h3>
+            <p className="text-muted-foreground mb-6">Arama kriterlerinizi değiştirmeyi deneyin</p>
+            <Button data-testid="button-clear-filters-empty" variant="outline" onClick={clearFilters}>
+              Filtreleri Temizle
+            </Button>
+          </div>
+        ) : (
+          <motion.div
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+            initial="hidden"
+            animate="show"
+            variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
+          >
+            {businesses.map((business) => (
+              <motion.div
+                key={business.id}
+                data-testid={`card-business-${business.id}`}
+                variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } }}
+              >
+                <BusinessCard business={business} />
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
